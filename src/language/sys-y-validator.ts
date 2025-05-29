@@ -4,6 +4,7 @@ import type { SysYAstType, CompUnit, FuncDef, VarDecl, ConstDecl, StructDef, Fun
 /**
  * 对SysY AST节点进行验证的检查集合。
  */
+
 export const validationChecks: ValidationChecks<SysYAstType> = {
     /**
      * 检查全局作用域中的重复定义（变量、常量和函数）。

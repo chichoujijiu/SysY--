@@ -40,7 +40,7 @@ ConstDecl:
 ;
 
 ConstDef:
-    name+=ID ('[' dimensions+=ConstExp ']')* '+=' value+=ConstInitVal
+    name+=ID ('[' dimensions+=ConstExp ']')* '=' value+=ConstInitVal
 ;
 
 ConstInitVal:
@@ -55,7 +55,7 @@ VarDecl:
 
 VarDef:
     name+=ID ('[' dimensions+=ConstExp ']')*
-    | name+=ID ('[' dimensions+=ConstExp ']')* '+=' value+=InitVal
+    | name+=ID ('[' dimensions+=ConstExp ']')* '=' value+=InitVal
 ;
 
 InitVal:
@@ -88,7 +88,7 @@ BlockItem:
 ;
 
 Stmt:
-    LVal '+=' Exp ';'         
+    LVal '=' Exp ';'         
     | Exp? ';'               
     | Block                 
     | 'if' '(' cond+=Cond ')' then+=Stmt ('else' else+=Stmt)? 
