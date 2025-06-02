@@ -4,11 +4,22 @@ hidden terminal WS: /\s+/;
 hidden terminal ML_COMMENT: /\/\*[\s\S]*?\*\//;
 hidden terminal SL_COMMENT: /\/\/[^\n\r]*/;
 
-terminal ID: /.[\w]*/;
-terminal INT_CONST: /([0-9]+|(0x|0X)[0-9A-Fa-f]+|0[0-7]+)/;
-terminal FLOAT_CONST: /[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?/;
+// 字符串和字符常量优先
 terminal CHAR_CONST: /'(\\.|[^\\'])'/;
 terminal STR_CONST: /"(\\.|[^\\"])*"/;
+
+// 浮点数优先于整数
+terminal FLOAT_CONST: /[0-9]+\.[0-9]+([eE][-+]?[0-9]+)?|\.[0-9]+([eE][-+]?[0-9]+)?|[0-9]+[eE][-+]?[0-9]+/;
+
+// 十六进制和八进制
+terminal HEX_CONST: /0[xX][0-9A-Fa-f]+/;
+terminal OCT_CONST: /0[0-7]+/;
+
+// ID - 任何包含至少一个字母或下划线的字母数字序列
+terminal ID: /[0-9]*[a-zA-Z_][a-zA-Z0-9_]*/;
+
+// 十进制整数 - 纯数字
+terminal INT_CONST: /[1-9][0-9]*|0/;
 
 entry Model:
     compUnit+=CompUnit 
@@ -88,14 +99,14 @@ BlockItem:
 ;
 
 Stmt:
-    LVal '=' Exp ';'         
-    | Exp? ';'               
-    | Block                 
+    lval+=LVal '=' exp+=Exp ';'         
+    | exp+=Exp? ';'               
+    | block+=Block                 
     | 'if' '(' cond+=Cond ')' then+=Stmt ('else' else+=Stmt)? 
-    | 'while' '(' cond+=Cond ')' 
+    | 'while' '(' cond+=Cond ')' body+=Stmt
     | 'break' ';'        
     | 'continue' ';'         
-    | 'return' Exp? ';'      
+    | 'return' exp+=Exp? ';'      
 ;
 
 Exp:
@@ -120,6 +131,8 @@ PrimaryExp:
 
 Literal:
     value+=INT_CONST      //IntLiteral
+    | value+=HEX_CONST    //HexLiteral
+    | value+=OCT_CONST    //OctLiteral
     | value+=FLOAT_CONST  //FloatLiteral
     | value+=CHAR_CONST   //CharLiteral
     | value+=STR_CONST    //StrLiteral

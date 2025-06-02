@@ -83,34 +83,53 @@ export const validationChecks: ValidationChecks<SysYAstType> = {
         accept('error', `函数名 '${name}' 不符合标识符规范（应以字母或下划线开头，后接字母、数字或下划线）。`, { node: node, property: 'name' });
     }
 }
-        // 检查重复的参数名称
-        const paramNames = new Set<string>();
-        const params: FuncFParam[] = (node as any).params || (node as any).parameters || [];
-        for (const p of params) {
-            const pname = (p as any).name;
-            if (paramNames.has(pname)) {
-                accept('error', `函数 '${node.name}' 中重复的参数名 '${pname}'。`, { node: p, property: 'name' });
-            }
-            paramNames.add(pname);
+// 检查重复的参数名称
+const paramNames = new Set<string>();
+let params: FuncFParam[] = [];
+if (Array.isArray(node.params) && node.params.length > 0) {
+    // 收集所有参数列表中的参数
+    for (const funcParams of node.params) {
+        if (Array.isArray(funcParams.params)) {
+            params = params.concat(funcParams.params);
         }
+    }
+}
+for (const p of params) {
+    const pname = Array.isArray(p.name) ? p.name[0] : p.name;
+    if (paramNames.has(pname)) {
+        accept('error', `函数 '${Array.isArray(node.name) ? node.name[0] : node.name}' 中重复的参数名 '${pname}'。`, { node: p, property: 'name' });
+    }
+    paramNames.add(pname);
+}
         // 检查函数内的局部变量/常量声明是否重复
-        const localDecls = (node as any).block?.decls || (node as any).body?.decls || (node as any).decls || [];
         const localNames = new Set<string>();
-        for (const decl of localDecls) {
-            if ('name' in decl) {
-                const name: string = (decl as any).name;
-                if (paramNames.has(name) || localNames.has(name)) {
-                    accept('error', `函数 '${node.name}' 作用域中重复的标识符 '${name}'。`, { node: decl, property: 'name' });
-                }
-                localNames.add(name);
-            }
-            if (Array.isArray((decl as any).vars)) {
-                for (const vd of (decl as any).vars) {
-                    const name: string = (vd as any).name;
-                    if (paramNames.has(name) || localNames.has(name)) {
-                        accept('error', `函数 '${node.name}' 作用域中重复的标识符 '${name}'。`, { node: vd, property: 'name' });
+        
+        // 获取函数体（Block）
+        const body = Array.isArray(node.body) ? node.body[0] : node.body;
+        if (body && body.items) {
+            // 遍历Block中的所有items
+            for (const item of body.items) {
+                // 处理变量声明
+                if (item.$type === 'VarDecl') {
+                    const defs = item.defs || [];
+                    for (const def of defs) {
+                        const defName = Array.isArray(def.name) ? def.name[0] : def.name;
+                        if (paramNames.has(defName) || localNames.has(defName)) {
+                            accept('error', `函数 '${Array.isArray(node.name) ? node.name[0] : node.name}' 作用域中重复的标识符 '${defName}'。`, { node: def, property: 'name' });
+                        }
+                        localNames.add(defName);
                     }
-                    localNames.add(name);
+                }
+                // 处理常量声明
+                else if (item.$type === 'ConstDecl') {
+                    const defs = item.defs || [];
+                    for (const def of defs) {
+                        const defName = Array.isArray(def.name) ? def.name[0] : def.name;
+                        if (paramNames.has(defName) || localNames.has(defName)) {
+                            accept('error', `函数 '${Array.isArray(node.name) ? node.name[0] : node.name}' 作用域中重复的标识符 '${defName}'。`, { node: def, property: 'name' });
+                        }
+                        localNames.add(defName);
+                    }
                 }
             }
         }
@@ -123,33 +142,19 @@ export const validationChecks: ValidationChecks<SysYAstType> = {
      * int arr[3][n];     // Error: 维度必须为常量表达式（n非常量）
      */
     VarDecl: (node: VarDecl, accept: ValidationAcceptor): void => {
-        // 处理单一声明的情况
-        if ('name' in node) {
-            const name = (node as any).name;
-            // 变量名必须以字母开头
-            if (!/^[A-Za-z]/.test(name)) {
-                accept('error', `变量名 '${name}' 必须以字母开头。`, { node: node, property: 'name' });
+        // 处理VarDef数组
+        const defs = (node as any).defs || [];
+        for (const def of defs) {
+            const name = Array.isArray(def.name) ? def.name[0] : def.name;
+            // 变量名必须以字母或下划线开头
+            if (!/^[_A-Za-z][_A-Za-z0-9]*$/.test(name)) {
+                accept('error', `变量名 '${name}' 不符合标识符规范（应以字母或下划线开头，后接字母、数字或下划线）。`, { node: def, property: 'name' });
             }
-            // 检查每个维度表达式是否为常量整型（假设数值字面量有'value'属性）
-            const dims = (node as any).dims || (node as any).dimensions || [];
+            // 检查数组维度是否为简单的整数字面量
+            const dims = def.dimensions || [];
             for (const dimExp of dims) {
-                if ((dimExp as any).value === undefined || isNaN(Number((dimExp as any).value))) {
+                if (!isSimpleIntegerLiteral(dimExp)) {
                     accept('error', `数组维度必须是常量整型表达式。`, { node: dimExp });
-                }
-            }
-        }
-        // 处理多变量声明的情况（VarDef数组）
-        if (Array.isArray((node as any).vars)) {
-            for (const vd of (node as any).vars) {
-                const name = vd.name;
-                if (!/^[A-Za-z]/.test(name)) {
-                    accept('error', `变量名 '${name}' 必须以字母开头。`, { node: vd, property: 'name' });
-                }
-                const dims = (vd as any).dims || (vd as any).dimensions || [];
-                for (const dimExp of dims) {
-                    if ((dimExp as any).value === undefined || isNaN(Number((dimExp as any).value))) {
-                        accept('error', `数组维度必须是常量整型表达式。`, { node: dimExp });
-                    }
                 }
             }
         }
@@ -161,31 +166,19 @@ export const validationChecks: ValidationChecks<SysYAstType> = {
      * const int MATRIX[2][x] = {{1,2}};  // Error: x非常量
      */
     ConstDecl: (node: ConstDecl, accept: ValidationAcceptor): void => {
-        // 处理单一声明的情况
-        if ('name' in node) {
-            const name = (node as any).name;
-            if (!/^[A-Za-z]/.test(name)) {
-                accept('error', `常量名 '${name}' 必须以字母开头。`, { node: node, property: 'name' });
+        // 处理ConstDef数组
+        const defs = (node as any).defs || [];
+        for (const def of defs) {
+            const name = Array.isArray(def.name) ? def.name[0] : def.name;
+            // 常量名必须以字母或下划线开头
+            if (!/^[_A-Za-z][_A-Za-z0-9]*$/.test(name)) {
+                accept('error', `常量名 '${name}' 不符合标识符规范（应以字母或下划线开头，后接字母、数字或下划线）。`, { node: def, property: 'name' });
             }
-            const dims = (node as any).dims || (node as any).dimensions || [];
+            // 检查数组维度是否为简单的整数字面量
+            const dims = def.dimensions || [];
             for (const dimExp of dims) {
-                if ((dimExp as any).value === undefined || isNaN(Number((dimExp as any).value))) {
+                if (!isSimpleIntegerLiteral(dimExp)) {
                     accept('error', `数组维度必须是常量整型表达式。`, { node: dimExp });
-                }
-            }
-        }
-        // 处理多常量声明的情况
-        if (Array.isArray((node as any).consts)) {
-            for (const cd of (node as any).consts) {
-                const name = cd.name;
-                if (!/^[A-Za-z]/.test(name)) {
-                    accept('error', `常量名 '${name}' 必须以字母开头。`, { node: cd, property: 'name' });
-                }
-                const dims = (cd as any).dims || (cd as any).dimensions || [];
-                for (const dimExp of dims) {
-                    if ((dimExp as any).value === undefined || isNaN(Number((dimExp as any).value))) {
-                        accept('error', `数组维度必须是常量整型表达式。`, { node: dimExp });
-                    }
                 }
             }
         }
@@ -222,46 +215,57 @@ export const validationChecks: ValidationChecks<SysYAstType> = {
      * }
      */
     LVal: (node: LVal, accept: ValidationAcceptor): void => {
-        const name: string = (node as any).name;
-        // 查找最近的函数作用域
-        let current: any = node;
+        // 添加调试信息
+        console.log('LVal 验证器被调用，节点:', node);
+        
+        // 获取变量名 - first 是一个数组，取第一个元素
+        const firstArray = node.first;
+        if (!firstArray || firstArray.length === 0) {
+            console.log('firstArray 为空或长度为0');
+            return;
+        }
+        const firstName = firstArray[0];
+        console.log('变量名:', firstName);
+        
+        // 查找包含此 LVal 的函数
         let funcNode: any = null;
-        while (current && current.$container) {
-            if ((current as any).params || (current as any).parameters) {
+        let current: AstNode | undefined = node;
+        while (current) {
+            if (current.$type === 'FuncDef') {
                 funcNode = current;
                 break;
             }
             current = current.$container;
         }
-        let declaredDims = 0;
+        
+        // 查找根节点（CompUnit）
+        let rootNode: any = null;
+        current = node;
+        while (current) {
+            if (current.$type === 'CompUnit') {
+                rootNode = current;
+                break;
+            }
+            current = current.$container;
+        }
+        
         let found = false;
-        // 检查函数参数
-        if (funcNode) {
-            const funcParams: any[] = (funcNode as any).params || (funcNode as any).parameters || [];
-            for (const p of funcParams) {
-                if ((p as any).name === name) {
-                    found = true;
-                    declaredDims = 0;  // 参数视为标量
-                    break;
-                }
-            }
-        }
-        // 检查局部声明
-        if (!found && funcNode) {
-            const localDecls = (funcNode as any).block?.decls || (funcNode as any).body?.decls || (funcNode as any).decls || [];
-            for (const decl of localDecls) {
-                if ('name' in decl && (decl as any).name === name) {
-                    found = true;
-                    const dims = (decl as any).dims || (decl as any).dimensions || [];
-                    declaredDims = dims.length;
-                    break;
-                }
-                if (Array.isArray((decl as any).vars)) {
-                    for (const vd of (decl as any).vars) {
-                        if ((vd as any).name === name) {
+        let declaredDims = 0;
+        
+        // 1. 检查函数参数
+        if (funcNode && funcNode.params) {
+            for (const funcParams of funcNode.params) {
+                if (funcParams.params) {
+                    for (const param of funcParams.params) {
+                        const paramName = Array.isArray(param.name) ? param.name[0] : param.name;
+                        if (paramName === firstName) {
                             found = true;
-                            const dims = (vd as any).dims || (vd as any).dimensions || [];
-                            declaredDims = dims.length;
+                            // 检查参数的维度
+                            declaredDims = param.dimensions ? param.dimensions.length : 0;
+                            // 如果参数声明中有 '[]'，也算一维
+                            if (param.$cstNode?.text?.includes('[]')) {
+                                declaredDims = 1;
+                            }
                             break;
                         }
                     }
@@ -269,38 +273,28 @@ export const validationChecks: ValidationChecks<SysYAstType> = {
                 if (found) break;
             }
         }
-        // 检查全局声明
-        if (!found) {
-            const rootDecls = (current as any).decls || (current as any).compUnit?.decls || [];
-            // 全局变量检查
-            for (const decl of rootDecls) {
-                if ('name' in decl && (decl as any).name === name) {
-                    found = true;
-                    const dims = (decl as any).dims || (decl as any).dimensions || [];
-                    declaredDims = dims.length;
-                    break;
-                }
-                if (Array.isArray((decl as any).vars)) {
-                    for (const vd of (decl as any).vars) {
-                        if ((vd as any).name === name) {
-                            found = true;
-                            const dims = (vd as any).dims || (vd as any).dimensions || [];
-                            declaredDims = dims.length;
-                            break;
-                        }
-                    }
-                }
-                if (found) break;
-            }
-            // 全局常量检查
-            if (!found) {
-                for (const decl of rootDecls) {
-                    if (Array.isArray((decl as any).consts)) {
-                        for (const cd of (decl as any).consts) {
-                            if ((cd as any).name === name) {
+        
+        // 2. 检查函数局部变量
+        if (!found && funcNode && funcNode.body) {
+            const body = Array.isArray(funcNode.body) ? funcNode.body[0] : funcNode.body;
+            if (body && body.items) {
+                for (const item of body.items) {
+                    if (item.$type === 'VarDecl' && item.defs) {
+                        for (const def of item.defs) {
+                            const defName = Array.isArray(def.name) ? def.name[0] : def.name;
+                            if (defName === firstName) {
                                 found = true;
-                                const dims = (cd as any).dims || (cd as any).dimensions || [];
-                                declaredDims = dims.length;
+                                declaredDims = def.dimensions ? def.dimensions.length : 0;
+                                console.log('找到局部变量:', defName, '维度:', declaredDims);
+                                break;
+                            }
+                        }
+                    } else if (item.$type === 'ConstDecl' && item.defs) {
+                        for (const def of item.defs) {
+                            const defName = Array.isArray(def.name) ? def.name[0] : def.name;
+                            if (defName === firstName) {
+                                found = true;
+                                declaredDims = def.dimensions ? def.dimensions.length : 0;
                                 break;
                             }
                         }
@@ -309,83 +303,133 @@ export const validationChecks: ValidationChecks<SysYAstType> = {
                 }
             }
         }
+        
+        // 3. 检查全局变量和常量
+        if (!found && rootNode && rootNode.declarations) {
+            for (const decl of rootNode.declarations) {
+                if (decl.$type === 'VarDecl' && decl.defs) {
+                    for (const def of decl.defs) {
+                        const defName = Array.isArray(def.name) ? def.name[0] : def.name;
+                        if (defName === firstName) {
+                            found = true;
+                            declaredDims = def.dimensions ? def.dimensions.length : 0;
+                            break;
+                        }
+                    }
+                } else if (decl.$type === 'ConstDecl' && decl.defs) {
+                    for (const def of decl.defs) {
+                        const defName = Array.isArray(def.name) ? def.name[0] : def.name;
+                        if (defName === firstName) {
+                            found = true;
+                            declaredDims = def.dimensions ? def.dimensions.length : 0;
+                            break;
+                        }
+                    }
+                }
+                if (found) break;
+            }
+        }
+        
+        console.log('查找结果 - found:', found, 'declaredDims:', declaredDims);
+        
+        // 报告错误
         if (!found) {
-            accept('error', `变量 '${name}' 未定义。`, { node: node });
+            console.log('报告错误: 变量未定义');
+            accept('error', `变量 '${firstName}' 未定义。`, { node: node, property: 'first' });
         } else {
             // 验证维度数量匹配
-            const indices = (node as any).indices || [];
-            const usedIndices = indices.length;
+            const usedIndices = node.indices ? node.indices.length : 0;
+            console.log('使用的维度:', usedIndices, '声明的维度:', declaredDims);
             if (usedIndices !== declaredDims) {
-                accept('error', `数组 '${name}' 使用 ${usedIndices} 维访问，但声明为 ${declaredDims} 维。`, { node: node });
+                console.log('报告错误: 维度不匹配');
+                accept('error', `数组 '${firstName}' 使用 ${usedIndices} 维访问，但声明为 ${declaredDims} 维。`, { node: node });
             }
         }
     },
 
-    // // 新增类型兼容性检查
-    // Stmt: (node: Stmt, accept: ValidationAcceptor) => {
-    //     // 检查赋值语句类型兼容性
-    //     if (node.$type === 'AssignmentStmt') {
-    //         const leftType = resolveType(node.left);
-    //         const rightType = resolveType(node.right);
-    //         if (!isTypeCompatible(leftType, rightType)) {
-    //             accept('error', `类型不兼容: ${leftType} ≠ ${rightType}`, { node });
-    //         }
-    //     }
-        
-    //     // 检查return语句类型
-    //     if (node.$type === 'ReturnStmt') {
-    //         const func = findContainingFunction(node);
-    //         if (func) {
-    //             const returnType = func.returnType;
-    //             if (returnType === 'void' && node.exp) {
-    //                 accept('error', 'void函数不能返回值', { node });
-    //             } else if (returnType !== 'void') {
-    //                 if (!node.exp) {
-    //                     accept('error', '缺少返回值', { node });
-    //                 } else {
-    //                     const expType = resolveType(node.exp);
-    //                     if (!isTypeCompatible(returnType, expType)) {
-    //                         accept('error', `返回值类型不匹配: 预期${returnType}, 实际${expType}`, { node });
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // },
+    /**
+     * 检查语句，特别是赋值语句中的左值
+     */
+    Stmt: (node: any, accept: ValidationAcceptor): void => {
+        // 检查赋值语句的格式：LVal '=' Exp ';'
+        // 在语法中，这会生成包含 LVal 的节点
+        // LVal 的验证会自动触发，这里主要确保赋值语句的结构正确
+    },
 
-    // // 函数调用参数检查
-    // UnaryExp: (node: UnaryExp, accept: ValidationAcceptor) => {
-    //     if (node.callee) {
-    //         const func = resolveReference(node.callee) as FuncDef;
-    //         if (func?.$type === 'FuncDef') {
-    //             // 参数数量检查
-    //             if (node.args.length !== func.params.length) {
-    //                 accept('error', `参数数量不匹配: 需要${func.params.length}个`, { node });
-    //             }
-    //             // 参数类型检查
-    //             func.params.forEach((param, i) => {
-    //                 const argType = resolveType(node.args[i]);
-    //                 const paramType = resolveType(param);
-    //                 if (!isTypeCompatible(paramType, argType)) {
-    //                     accept('error', `参数${i+1}类型不匹配: 需要${paramType}`, { node: node.args[i] });
-    //                 }
-    //             });
-    //         }
-    //     }
-    // },
-
-    // 常量表达式检查
-ConstExp: (node: ConstExp, accept: ValidationAcceptor) => {
-    const checkNode = (n: AstNode) => {
-        if (n.$type === 'LVal') {
-            accept('error', '常量表达式不能包含变量', { node: n });
+    ConstExp: (node: ConstExp, accept: ValidationAcceptor) => {
+            const visited = new Set<AstNode>();
+            const checkNode = (n: AstNode, depth: number = 0) => {
+                // 防止无限递归
+                if (depth > 100) {
+                    accept('error', '常量表达式嵌套过深', { node: n });
+                    return;
+                }
+                
+                // 避免重复检查同一节点
+                if (visited.has(n)) {
+                    return;
+                }
+                visited.add(n);
+                
+                if (n.$type === 'LVal') {
+                    accept('error', '常量表达式不能包含变量', { node: n });
+                    return;
+                }
+                
+                // 手动遍历子节点
+                for (const child of AstUtils.streamAst(n)) {
+                    checkNode(child, depth + 1);
+                }
+            };
+            checkNode(node);
         }
-        // 手动遍历子节点
-        for (const child of AstUtils.streamAst(n)) {
-            checkNode(child);
-        }
-    };
-    checkNode(node);
-}
-
 };
+
+/**
+ * 检查常量表达式是否为简单的整数字面量（不包含运算）
+ */
+function isSimpleIntegerLiteral(node: any): boolean {
+    if (!node) return false;
+    
+    // 使用字符串化的方式检查是否包含运算符
+    const checkForOperators = (n: AstNode): boolean => {
+        let hasOperator = false;
+        
+        // 遍历AST节点
+        for (const child of AstUtils.streamAst(n)) {
+            // 检查是否有运算符属性
+            if ((child as any).op && (child as any).op.length > 0) {
+                hasOperator = true;
+                break;
+            }
+            // 检查是否有函数调用
+            if ((child as any).callee) {
+                hasOperator = true;
+                break;
+            }
+            // 检查是否有变量引用
+            if (child.$type === 'LVal') {
+                hasOperator = true;
+                break;
+            }
+        }
+        
+        return hasOperator;
+    };
+    
+    // 如果包含运算符或变量，则不是简单字面量
+    if (checkForOperators(node)) {
+        return false;
+    }
+    
+    // 检查是否包含整数字面量
+    let hasIntLiteral = false;
+    for (const child of AstUtils.streamAst(node)) {
+        if (child.$type === 'Literal' && (child as any).value) {
+            hasIntLiteral = true;
+            break;
+        }
+    }
+    
+    return hasIntLiteral;
+}
