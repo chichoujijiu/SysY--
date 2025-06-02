@@ -357,32 +357,66 @@ for (const p of params) {
     },
 
     ConstExp: (node: ConstExp, accept: ValidationAcceptor) => {
-            const visited = new Set<AstNode>();
-            const checkNode = (n: AstNode, depth: number = 0) => {
-                // 防止无限递归
-                if (depth > 100) {
-                    accept('error', '常量表达式嵌套过深', { node: n });
-                    return;
+        // 检查这个 ConstExp 是否在正确的上下文中
+        // 只有在以下情况下才需要验证：
+        // 1. 作为数组维度 (VarDef, ConstDef, FuncFParam 的 dimensions)
+        // 2. 作为常量初始化值 (ConstInitVal)
+        
+        let parent: AstNode | undefined = node.$container;
+        let isInConstContext = false;
+        
+        // 向上查找父节点，确定是否在常量上下文中
+        while (parent) {
+            const parentType = parent.$type;
+            
+            // 检查是否是数组维度
+            if (parentType === 'VarDef' || parentType === 'ConstDef' || parentType === 'FuncFParam') {
+                const dimensions = (parent as any).dimensions;
+                if (Array.isArray(dimensions) && dimensions.includes(node)) {
+                    isInConstContext = true;
+                    break;
                 }
-                
-                // 避免重复检查同一节点
-                if (visited.has(n)) {
-                    return;
-                }
-                visited.add(n);
-                
-                if (n.$type === 'LVal') {
-                    accept('error', '常量表达式不能包含变量', { node: n });
-                    return;
-                }
-                
-                // 手动遍历子节点
-                for (const child of AstUtils.streamAst(n)) {
-                    checkNode(child, depth + 1);
-                }
-            };
-            checkNode(node);
+            }
+            // 检查是否是常量初始化值
+            else if (parentType === 'ConstInitVal') {
+                isInConstContext = true;
+                break;
+            }
+            parent = parent.$container;
         }
+        
+        // 如果不在常量上下文中，不进行验证
+        if (!isInConstContext) {
+            return;
+        }
+        
+        // 原有的验证逻辑
+        const visited = new Set<AstNode>();
+        const checkNode = (n: AstNode, depth: number = 0) => {
+            // 防止无限递归
+            if (depth > 100) {
+                accept('error', '常量表达式嵌套过深', { node: n });
+                return;
+            }
+            
+            // 避免重复检查同一节点
+            if (visited.has(n)) {
+                return;
+            }
+            visited.add(n);
+            
+            if (n.$type === 'LVal') {
+                accept('error', '常量表达式不能包含变量', { node: n });
+                return;
+            }
+            
+            // 手动遍历子节点
+            for (const child of AstUtils.streamAst(n)) {
+                checkNode(child, depth + 1);
+            }
+        };
+        checkNode(node);
+    }
 };
 
 /**

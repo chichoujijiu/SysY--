@@ -1,113 +1,55 @@
 import * as vscode from 'vscode';
-import { LangiumCoreServices } from 'langium';
-import { SysYServices } from '../language/sys-y-module.js';
-import { AstNode, CstNode, URI } from 'langium';
-import { isLVal, isFuncDef, isVarDef, isConstDef } from '../language/generated/ast.js';
 
 export class SysYHoverProvider implements vscode.HoverProvider {
-    protected services?: LangiumCoreServices & SysYServices;
-
-    constructor(services?: LangiumCoreServices & SysYServices) {
-        this.services = services;
-    }
-
-    async provideHover(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): Promise<vscode.Hover | undefined> {
-        if (!this.services) {
+    async provideHover(
+        document: vscode.TextDocument,
+        position: vscode.Position,
+        token: vscode.CancellationToken
+    ): Promise<vscode.Hover | undefined> {
+        const range = document.getWordRangeAtPosition(position);
+        if (!range) {
             return undefined;
         }
 
-        const offset = document.offsetAt(position);
-        const cstNode = await this.findCstNodeAtOffset(document, offset);
+        const word = document.getText(range);
+        const line = document.lineAt(position.line).text;
         
-        if (!cstNode) {
-            return undefined;
+        // 检查是否是关键字
+        const keywords = ['break', 'char', 'const', 'continue', 'else', 'float', 'if', 'int', 'return', 'struct', 'void', 'while'];
+        if (keywords.includes(word)) {
+            return new vscode.Hover(`**关键字**: ${word}\n\n${this.getKeywordDescription(word)}`);
         }
 
-        const astNode = cstNode.astNode;
-        if (!astNode) {
-            return undefined;
+        // 检查是否是函数调用
+        if (line.includes(`${word}(`)) {
+            return new vscode.Hover(`**函数**: ${word}\n\n这是一个函数调用`);
         }
 
-        return this.createHover(astNode);
+        // 检查是否是变量声明
+        if (line.includes(`int ${word}`) || line.includes(`char ${word}`) || line.includes(`float ${word}`)) {
+            const type = line.match(/(int|char|float)\s+\*?\s*\w+/)?.[1] || 'unknown';
+            return new vscode.Hover(`**变量声明**: ${word}\n**类型**: ${type}`);
+        }
+
+        // 默认变量信息
+        return new vscode.Hover(`**标识符**: ${word}`);
     }
 
-    private async findCstNodeAtOffset(document: vscode.TextDocument, offset: number): Promise<CstNode | undefined> {
-        if (!this.services) {
-            return undefined;
-        }
-
-        const langiumDocument = await this.services.shared.workspace.LangiumDocuments.getOrCreateDocument(URI.parse(document.uri.toString()));
-        if (!langiumDocument.parseResult.value.$cstNode) {
-            return undefined;
-        }
-
-        return this.findCstNodeAtOffsetRecursive(langiumDocument.parseResult.value.$cstNode, offset);
-    }
-
-    private findCstNodeAtOffsetRecursive(node: CstNode | undefined, offset: number): CstNode | undefined {
-        if (!node) {
-            return undefined;
-        }
-
-        if (node.offset <= offset && offset <= node.end) {
-            const children = (node as any).children || [];
-            for (const child of children) {
-                const found = this.findCstNodeAtOffsetRecursive(child, offset);
-                if (found) {
-                    return found;
-                }
-            }
-            return node;
-        }
-        return undefined;
-    }
-
-    private createHover(node: AstNode): vscode.Hover | undefined {
-        if (isLVal(node)) {
-            // 变量引用
-            const varInfo = this.getVariableInfo(node);
-            if (varInfo) {
-                return new vscode.Hover(
-                    new vscode.MarkdownString(`**变量**: ${varInfo.name}\n**类型**: ${varInfo.type}`)
-                );
-            }
-        } else if (isFuncDef(node)) {
-            // 函数定义
-            const funcNode = node as any; // 临时类型断言
-            return new vscode.Hover(
-                new vscode.MarkdownString(`**函数**: ${funcNode.name}\n**返回类型**: ${funcNode.funcType}`)
-            );
-        } else if (isVarDef(node)) {
-            // 变量定义
-            const varNode = node as any; // 临时类型断言
-            return new vscode.Hover(
-                new vscode.MarkdownString(`**变量定义**: ${varNode.name}\n**类型**: ${this.getTypeFromParent(node)}`)
-            );
-        } else if (isConstDef(node)) {
-            // 常量定义
-            const constNode = node as any; // 临时类型断言
-            return new vscode.Hover(
-                new vscode.MarkdownString(`**常量定义**: ${constNode.name}\n**类型**: ${this.getTypeFromParent(node)}`)
-            );
-        }
-        return undefined;
-    }
-
-    private getVariableInfo(node: any): { name: string; type: string } | undefined {
-        // 这里需要实现变量信息的查找逻辑
-        // 可以通过作用域分析来获取变量的类型信息
-        return {
-            name: node.name,
-            type: 'unknown' // 需要实现类型推导
+    private getKeywordDescription(keyword: string): string {
+        const descriptions: { [key: string]: string } = {
+            'int': '32位整数类型',
+            'char': '字符类型',
+            'float': '浮点数类型',
+            'void': '空类型',
+            'const': '常量修饰符',
+            'if': '条件语句',
+            'else': '条件语句的else分支',
+            'while': '循环语句',
+            'break': '跳出循环',
+            'continue': '继续下一次循环',
+            'return': '函数返回语句',
+            'struct': '结构体类型'
         };
+        return descriptions[keyword] || '语言关键字';
     }
-
-    private getTypeFromParent(node: any): string {
-        // 从父节点获取类型信息
-        const parent = node.$container;
-        if (parent && parent.type) {
-            return parent.type;
-        }
-        return 'unknown';
-    }
-} 
+}
