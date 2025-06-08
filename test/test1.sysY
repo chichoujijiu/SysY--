@@ -1,0 +1,16 @@
+int main(){
+    int a;
+    float a2=1;
+    int b=1;
+    int sum = a+b;
+    while (sum<100){
+        if (a>b){
+            a=a+1;
+        } 
+        else {
+            sum = sum - 10;
+        }
+    }
+    break;
+    return ;
+}
